@@ -19,9 +19,10 @@ package uk.gov.hmrc.customs.declarations.metrics.repo
 import javax.inject.{Inject, Singleton}
 import com.google.inject.ImplementedBy
 import play.api.libs.json.{Format, Json, OFormat}
+import reactivemongo.api.bson.BSONDocument
+import reactivemongo.api.bson.collection.BSONSerializationPack
 import reactivemongo.api.indexes.{Index, IndexType}
-import reactivemongo.bson.{BSONDocument, BSONLong, BSONObjectID}
-import reactivemongo.play.json.JsObjectDocumentWriter
+import reactivemongo.bson.BSONObjectID
 import uk.gov.hmrc.customs.api.common.logging.CdsLogger
 import uk.gov.hmrc.customs.declarations.metrics.model.{ConversationMetric, ConversationMetrics, Event, MetricsConfig}
 import uk.gov.hmrc.mongo.ReactiveRepository
@@ -48,18 +49,18 @@ class MetricsMongoRepo @Inject() (mongoDbProvider: MongoDbProvider,
   private implicit val format: OFormat[ConversationMetrics] = ConversationMetrics.conversationMetricsJF
   private implicit val formatEvent: Format[Event] = Event.EventJF
 
-  override def indexes: Seq[Index] = Seq(
-    Index(
-      key = Seq("conversationId" -> IndexType.Ascending),
-      name = Some("conversationId-Index"),
-      unique = true
-    ),
-    Index(
-      key = Seq("createdDate" -> IndexType.Ascending),
-      name = Some("createdDate-Index"),
-      options = BSONDocument("expireAfterSeconds" -> BSONLong(metricsConfig.ttlInSeconds))
-    )
-  )
+  createIndexes(Seq(
+      defineIndex(
+        key = Seq("conversationId" -> IndexType.Ascending),
+        name = Some("conversationId-Index"),
+        unique = true
+      ),
+      defineIndex(
+        key = Seq("createdDate" -> IndexType.Ascending),
+        name = Some("createdDate-Index"),
+        options = BSONDocument("expireAfterSeconds" -> metricsConfig.ttlInSeconds)
+      )
+  ))
 
   override def save(conversationMetrics: ConversationMetrics): Future[Boolean] = {
     logger.debug(s"saving conversationMetrics: $conversationMetrics")
@@ -92,4 +93,13 @@ class MetricsMongoRepo @Inject() (mongoDbProvider: MongoDbProvider,
     result
   }
 
+  private def createIndexes(indexes: Seq[Index]): Future[Seq[Boolean]] =
+    Future.sequence{ indexes.map{ index => collection.indexesManager.ensure(index) } }
+
+  private def defineIndex(key: Seq[(String, IndexType)],
+                          name: Option[String],
+                          unique: Boolean = false,
+                          background: Boolean = false,
+                          options: BSONDocument = BSONDocument.empty) =
+    Index(BSONSerializationPack)(key, name, unique, background, false, false, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, options)
 }
